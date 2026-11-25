@@ -1,16 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { z } from "zod";
+import {
+  parentTaskId,
+  subtaskRelation,
+  taskList,
+  type Task,
+  type TaskDetails,
+} from "../shared/tasks.ts";
 
-const storedTask = z.looseObject({ id: z.string(), title: z.string(), done: z.boolean() });
-const taskList = z.array(storedTask);
-type Task = z.infer<typeof storedTask>;
-type TaskChanges = Partial<Pick<Task, "title" | "done">>;
+type TaskChanges = Partial<Pick<Task, "title" | "done">> & TaskDetails;
+type CreateOptions = TaskDetails & { parentId?: string };
+
+export class TaskConflict extends Error {}
 
 export interface TaskStore {
   list(): Task[];
-  create(title: string): Task;
+  create(title: string, options?: CreateOptions): Task;
   update(id: string, changes: TaskChanges): Task | undefined;
   remove(id: string): boolean;
 }
@@ -32,9 +38,17 @@ export function createJsonTaskStore(filename: string): TaskStore {
   return {
     list,
 
-    create(title) {
-      const task = { id: randomUUID(), title, done: false };
-      save([...list(), task]);
+    create(title, options) {
+      const items = list();
+      if (
+        options?.parentId !== undefined &&
+        !items.some((item) => item.id === options.parentId && !parentTaskId(item))
+      ) {
+        throw new TaskConflict("主任务不存在，或指定的任务已经是子任务。");
+      }
+      const relationship = options?.parentId ? { taskRelation: subtaskRelation } : {};
+      const task = { ...options, ...relationship, id: randomUUID(), title, done: false };
+      save([...items, task]);
       return task;
     },
 
@@ -50,6 +64,9 @@ export function createJsonTaskStore(filename: string): TaskStore {
 
     remove(id) {
       const tasks = list();
+      if (tasks.some((task) => parentTaskId(task) === id)) {
+        throw new TaskConflict("这条主任务还有子任务。请先处理并删除子任务，再删除主任务。");
+      }
       const remaining = tasks.filter((task) => task.id !== id);
       if (remaining.length === tasks.length) return false;
 

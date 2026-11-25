@@ -1,11 +1,11 @@
 import { resolve } from "node:path";
 import express, { type ErrorRequestHandler } from "express";
-import { chatRequestSchema, type ChatMessage } from "../shared/chat.ts";
+import { chatRequestSchema, type ChatMessage, type ChatResponse } from "../shared/chat.ts";
 import type { TaskStore } from "./task-store.ts";
 import { taskRouter } from "./tasks.ts";
 
 interface AppDependencies {
-  reply(messages: ChatMessage[]): Promise<string>;
+  reply(messages: ChatMessage[], timeZone?: string): Promise<string | ChatResponse>;
   tasks: TaskStore;
 }
 
@@ -18,8 +18,8 @@ export function createApp({ reply, tasks }: AppDependencies) {
     if (!input.success) {
       return res.status(400).json({ error: "请提供对话记录，并以用户消息结尾。" });
     }
-    const answer = await reply(input.data.messages);
-    res.json({ reply: answer });
+    const answer = await reply(input.data.messages, input.data.timeZone);
+    res.json(typeof answer === "string" ? { reply: answer } : answer);
   });
 
   app.use("/api/tasks", taskRouter(tasks));

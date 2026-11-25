@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 小明智能体任务 API
-  version: 1.0.0
+  version: 2.0.0
 servers:
   - url: http://127.0.0.1:3000
 paths:
@@ -9,6 +9,24 @@ paths:
     get:
       operationId: listTasks
       summary: 按创建顺序列出全部任务，包括已完成任务
+      parameters:
+        - name: search
+          in: query
+          schema: { $ref: "#/components/schemas/Title" }
+        - name: priority
+          in: query
+          schema: { type: string, enum: [高, 中, 低] }
+        - name: due
+          in: query
+          description: 只返回对应截止区间内的未完成任务
+          schema: { type: string, enum: [today, overdue, future] }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [due] }
+        - name: timeZone
+          in: query
+          description: 用户时区，例如 Europe/Paris；省略时使用服务端时区
+          schema: { type: string }
       responses:
         "200":
           description: 任务列表；空列表为 []
@@ -17,6 +35,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Task" }
+        "400": { $ref: "#/components/responses/BadRequest" }
     post:
       operationId: createTask
       summary: 创建一条未完成任务
@@ -30,6 +49,10 @@ paths:
               required: [title]
               properties:
                 title: { $ref: "#/components/schemas/Title" }
+                parentId: { type: string }
+                dueAt: { $ref: "#/components/schemas/DueAt" }
+                priority: { $ref: "#/components/schemas/Priority" }
+                effort: { $ref: "#/components/schemas/Effort" }
       responses:
         "201":
           description: 新建的任务
@@ -37,6 +60,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Task" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/tasks/{id}:
     parameters:
       - name: id
@@ -45,7 +69,7 @@ paths:
         schema: { type: string }
     patch:
       operationId: updateTask
-      summary: 修改标题或完成状态
+      summary: 修改标题、完成状态或任务属性
       requestBody:
         required: true
         content:
@@ -57,6 +81,9 @@ paths:
               properties:
                 title: { $ref: "#/components/schemas/Title" }
                 done: { type: boolean }
+                dueAt: { $ref: "#/components/schemas/DueAt" }
+                priority: { $ref: "#/components/schemas/Priority" }
+                effort: { $ref: "#/components/schemas/Effort" }
       responses:
         "200":
           description: 更新后的任务
@@ -72,6 +99,7 @@ paths:
         "204":
           description: 删除成功，响应体为空
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 components:
   schemas:
     Title:
@@ -83,9 +111,27 @@ components:
       type: object
       required: [id, title, done]
       properties:
-        id: { type: string, format: uuid }
+        id: { type: string }
         title: { $ref: "#/components/schemas/Title" }
         done: { type: boolean }
+        parentId:
+          description: V2 子任务使用字符串引用主任务，旧数据额外字段可保留原类型
+        dueAt:
+          description: V2 截止日期，旧数据额外字段可保留原类型
+        priority:
+          description: V2 优先级，旧数据额外字段可保留原类型
+        effort:
+          description: V2 工作量，旧数据额外字段可保留原类型
+    DueAt:
+      description: 当地日历日期或带时区的时刻，null 用于清除
+      oneOf:
+        - { type: string, format: date }
+        - { type: string, format: date-time }
+        - { type: "null" }
+    Priority:
+      enum: [高, 中, 低, null]
+    Effort:
+      enum: [小, 中, 大, null]
     Error:
       type: object
       required: [error]
@@ -99,6 +145,11 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
     NotFound:
       description: 任务不存在
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: 主任务无效或仍有关联子任务，操作未执行
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
